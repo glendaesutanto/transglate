@@ -279,7 +279,7 @@ const handleMessage = async (event) => {
       replyMessage = `Hi, I'm a translator bot. You can use me to translate text. Type /commands to see available commands`;
       break;
     default:
-      replyMessage = `Unknown command`;
+      replyMessage = `Unknown command. Please type /commands to see available commands`;
       break;
   }
   console.log("replyMessage:", replyMessage);
