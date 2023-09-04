@@ -7,6 +7,8 @@ const env = dotenv.config().parsed;
 const app = express();
 const mongoose = require("mongoose");
 
+const { translate } = require("@vitalets/google-translate-api");
+
 mongoose.connect(env.MONGODB_URL, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -174,6 +176,12 @@ const translateText = async (text, from, to) => {
   return translatedText;
 };
 
+const translateTextWithNewLibrary = async (text, from, to) => {
+  const translatedText = await translate(text, { from, to });
+  console.log("translatedText:", translatedText);
+  return translatedText.text;
+};
+
 const sendMessage = async (replyToken, message) => {
   return client.replyMessage(replyToken, {
     type: "text",
@@ -201,8 +209,8 @@ const handleMessage = async (event) => {
       replyMessage = `Available commands:
       /commands - Show available commands
       /languages - Show available languages
-      /set-from-language [language-code] - Set from language (language code can be seen from /languages)
-      /set-to-language [language-code] - Set to language (language code can be seen from /languages)
+      /sfl [language-code] - Set from language (language code can be seen from /languages. set to "auto" to detect language automatically)
+      /stl [language-code] - Set to language (language code can be seen from /languages)
       /translate - Translate text
       /help - Show help`;
       break;
@@ -217,23 +225,31 @@ const handleMessage = async (event) => {
       replyMessage = `Available languages:\n
         ${languages.join("\n")}`;
       break;
-    case "/set-from-language":
+    case "/sfl":
       const fromLanguageCode = message.split(" ")[1];
-      const fromLanguageData = await Language.findOne({
-        language: fromLanguageCode,
-      });
-      if (!fromLanguageData) {
-        return sendMessage(event.replyToken, `Unknown language`);
+      let fromLanguageData = null;
+      let fromLanguageName = null;
+      if (fromLanguageCode !== "auto") {
+        fromLanguageData = await Language.findOne({
+          language: fromLanguageCode,
+        });
+        if (!fromLanguageData) {
+          return sendMessage(event.replyToken, `Unknown language`);
+        }
+        fromLanguageName = fromLanguageData.name.find(
+          (item) => item.code === "en"
+        );
       }
-      const fromLanguageName = fromLanguageData.name.find(
-        (item) => item.code === "en"
-      );
       user = await createUserIfNotExist(event.source.userId);
       user.fromLanguage = fromLanguageCode;
       await user.save();
-      replyMessage = `Your "from" language has been set to ${fromLanguageName.name}`;
+      replyMessage = `Your "from" language has been set to ${
+        fromLanguageName && fromLanguageName.name
+          ? fromLanguageName.name
+          : "auto"
+      }`;
       break;
-    case "/set-to-language":
+    case "/stl":
       const toLanguageCode = message.split(" ")[1];
       const toLanguageData = await Language.findOne({
         language: toLanguageCode,
@@ -252,7 +268,7 @@ const handleMessage = async (event) => {
     case "/translate":
       user = await createUserIfNotExist(event.source.userId);
       const text = message.split(" ").slice(1).join(" ");
-      const translatedText = await translateText(
+      const translatedText = await translateTextWithNewLibrary(
         text,
         user.fromLanguage,
         user.toLanguage
