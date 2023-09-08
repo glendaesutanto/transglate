@@ -15,8 +15,8 @@ const userSchema = new mongoose.Schema({
     default: "en",
   },
   toLanguage: {
-    type: String,
-    default: "id",
+    type: [String],
+    default: ["id", "en"],
   },
   pictureUrl: {
     type: String,

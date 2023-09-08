@@ -203,16 +203,19 @@ const handleMessage = async (event) => {
   console.log("message:", message);
   console.log("command:", command);
   let replyMessage = "";
-  let user = null;
+  let splittedMessage = null;
+  let translatedText = null;
+  let user = await createUserIfNotExist(event.source.userId);
   switch (command) {
     case "/commands":
       replyMessage = `Available commands:
       /commands - Show available commands
       /languages - Show available languages
       /sfl [language-code] - Set from language (language code can be seen from /languages. set to "auto" to detect language automatically)
-      /stl [language-code] - Set to language (language code can be seen from /languages)
+      /stl [language-code-1](required) [language-code-2](optional) - Set to language (language code can be seen from /languages). If you set 2 language codes, the first one will be the main language and the second one will be the fallback language
       /translate - Translate text
-      /help - Show help`;
+      /help - Show help
+      p.s. when you don't type any command prefix, we assume you want to translate text`;
       break;
     case "/languages":
       const allLanguages = await Language.find({});
@@ -226,6 +229,10 @@ const handleMessage = async (event) => {
         ${languages.join("\n")}`;
       break;
     case "/sfl":
+      splittedMessage = message.split(" ");
+      if (splittedMessage.length < 2) {
+        return sendMessage(event.replyToken, `Please specify language code`);
+      }
       const fromLanguageCode = message.split(" ")[1];
       let fromLanguageData = null;
       let fromLanguageName = null;
@@ -240,7 +247,6 @@ const handleMessage = async (event) => {
           (item) => item.code === "en"
         );
       }
-      user = await createUserIfNotExist(event.source.userId);
       user.fromLanguage = fromLanguageCode;
       await user.save();
       replyMessage = `Your "from" language has been set to ${
@@ -250,28 +256,53 @@ const handleMessage = async (event) => {
       }`;
       break;
     case "/stl":
-      const toLanguageCode = message.split(" ")[1];
-      const toLanguageData = await Language.findOne({
-        language: toLanguageCode,
-      });
-      if (!toLanguageData) {
-        return sendMessage(event.replyToken, `Unknown language`);
+      splittedMessage = message.split(" ");
+      if (splittedMessage.length < 2) {
+        return sendMessage(event.replyToken, `Please specify language code`);
       }
-      const toLanguageName = toLanguageData.name.find(
+      const toMainLanguageCode = message.split(" ")[1];
+      const toMainLanguageData = await Language.findOne({
+        language: toMainLanguageCode,
+      });
+      if (!toMainLanguageData) {
+        return sendMessage(event.replyToken, `Unknown main language`);
+      }
+      const toMainLanguageName = toMainLanguageData.name.find(
         (item) => item.code === "en"
       );
-      user = await createUserIfNotExist(event.source.userId);
-      user.toLanguage = toLanguageCode;
+
+      let toFallbackLanguageCode = null;
+      let toFallbackLanguageName = null;
+      if (message.split(" ").length > 2) {
+        toFallbackLanguageCode = message.split(" ")[2];
+        const toFallbackLanguageData = await Language.findOne({
+          language: toFallbackLanguageCode,
+        });
+        if (!toFallbackLanguageData) {
+          return sendMessage(event.replyToken, `Unknown fallback language`);
+        }
+        toFallbackLanguageName = toFallbackLanguageData.name.find(
+          (item) => item.code === "en"
+        );
+      }
+      user.toLanguage = [toMainLanguageCode];
+      if (toFallbackLanguageCode) {
+        user.toLanguage.push(toFallbackLanguageCode);
+      }
       await user.save();
-      replyMessage = `Your "to" language has been set to ${toLanguageName.name}`;
+      replyMessage = `Your main "to" language has been set to ${
+        toMainLanguageName.name
+      }. ${
+        toFallbackLanguageCode
+          ? `Your fallback "to" language has been set to ${toFallbackLanguageName.name}`
+          : ""
+      }`;
       break;
     case "/translate":
-      user = await createUserIfNotExist(event.source.userId);
       const text = message.split(" ").slice(1).join(" ");
-      const translatedText = await translateTextWithNewLibrary(
+      translatedText = await translateTextBasedOnUserPreference(
         text,
-        user.fromLanguage,
-        user.toLanguage
+        user.userId
       );
       replyMessage = translatedText;
       break;
@@ -279,11 +310,33 @@ const handleMessage = async (event) => {
       replyMessage = `Hi, I'm a translator bot. You can use me to translate text. Type /commands to see available commands`;
       break;
     default:
-      replyMessage = `Unknown command. Please type /commands to see available commands`;
+      translatedText = await translateTextBasedOnUserPreference(
+        message,
+        user.userId
+      );
+      replyMessage = translatedText;
       break;
   }
   console.log("replyMessage:", replyMessage);
   return sendMessage(event.replyToken, replyMessage);
+};
+
+const translateTextBasedOnUserPreference = async (text, userId) => {
+  const user = await User.findOne({ userId: userId });
+  let translatedText = await translateTextWithNewLibrary(
+    text,
+    user.fromLanguage,
+    user.toLanguage[0]
+  );
+  if (text === translatedText && user.toLanguage[1]) {
+    translatedText = await translateTextWithNewLibrary(
+      text,
+      user.fromLanguage,
+      user.toLanguage[1]
+    );
+    return translatedText;
+  }
+  return translatedText;
 };
 
 const handleEvent = async (event) => {
